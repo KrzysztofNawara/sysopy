@@ -21,7 +21,6 @@
 #define UNIX_SOCKET_PATH_MAX 108
 #define USERNAME_MAX 16
 #define MSG_LEN_MAX 128
-#define DATAGRAM_SIZE 2*(USERNAME_MAX+1) + MSG_LEN_MAX + 1
 #define MIN_PORT 1024
 #define MAX_PORT 65535
 #define MSG_QUEUES_CAPACITY 64
@@ -107,7 +106,7 @@ void process_arguments(int argc, char **argv, program_arguments *args) {
 			printf("Wrong port\n");
 			EXIT();
 		}
-		inet_address->sin_port = (in_port_t)unvalidated_port;
+		inet_address->sin_port = htons((in_port_t)unvalidated_port);
 
 		args->address = inet_address;
 		args->address_size = sizeof(struct sockaddr_in);
@@ -131,7 +130,6 @@ void close_socket() {
 
 typedef struct {
 	char from[USERNAME_MAX+1];
-	char to[USERNAME_MAX+1];
 	char msg[MSG_LEN_MAX+1];
 } message;
 
@@ -177,10 +175,9 @@ void print_all_pending_msgs(queue_t *q_out) {
 	}
 }
 
-message *pack_message(char *from, char *to, char *content) {
+message *pack_message(char *from, char *content) {
 	message *msg = calloc(sizeof(message), 1);
 	strcpy(msg->from, from);
-	strcpy(msg->to, to);
 	strcpy(msg->msg, content);
 
 	return msg;
@@ -201,8 +198,6 @@ void *thread_io(void *_data) {
 	size_t bui_length = 0;
 	#define GET_LINE() getline(&buffer_for_user_input, &bui_length, stdin)
 
-	char recipient[USERNAME_MAX+1] = {0};
-
 	print_command_prompt();
 	while(should_exit != 1) {
 		if(input_avaliable() != 0) {
@@ -212,14 +207,10 @@ void *thread_io(void *_data) {
 				print_all_pending_msgs(data->q_out);
 				should_exit = 1;
 			} else if(strcmp(buffer_for_user_input, USR_CMD_TYPE) == 0) {
-				print_recipient_query();
-				GET_LINE();
-				strcpy(recipient, buffer_for_user_input);
-
 				print_content_query();
 				GET_LINE();
 
-				message *packed_msg = pack_message(data->program_args->username, recipient, buffer_for_user_input);
+				message *packed_msg = pack_message(data->program_args->username, buffer_for_user_input);
 				queue_enqueue(data->q_in, packed_msg);
 
 				print_command_prompt();
