@@ -150,6 +150,7 @@ short input_avaliable() {
 
 void print_command_prompt() {
 	printf("What do you want to do? [t - start typing message|e - exit]: ");
+	fflush(stdout);
 }
 
 void print_content_query() {
@@ -158,6 +159,7 @@ void print_content_query() {
 
 void print_recipient_query() {
 	printf("Type recipient: ");
+	fflush(stdout);
 }
 
 void print_all_pending_msgs(queue_t *q_out) {
@@ -206,10 +208,10 @@ void *thread_io(void *_data) {
 		if(input_avaliable() != 0) {
 			GET_LINE();
 
-			if(strcmp(buffer_for_user_input, USR_CMD_EXIT)) {
+			if(strcmp(buffer_for_user_input, USR_CMD_EXIT) == 0) {
 				print_all_pending_msgs(data->q_out);
 				should_exit = 1;
-			} else if(strcmp(buffer_for_user_input, USR_CMD_TYPE)) {
+			} else if(strcmp(buffer_for_user_input, USR_CMD_TYPE) == 0) {
 				print_recipient_query();
 				GET_LINE();
 				strcpy(recipient, buffer_for_user_input);
@@ -219,6 +221,8 @@ void *thread_io(void *_data) {
 
 				message *packed_msg = pack_message(data->program_args->username, recipient, buffer_for_user_input);
 				queue_enqueue(data->q_in, packed_msg);
+
+				print_command_prompt();
 			} else {
 				print_command_prompt();
 			}
@@ -242,7 +246,7 @@ void thread_networking(thread_data *data) {
 	while(should_exit != 1) {
 		ret = poll(fds, 1, -1);
 		if(ret > 0) {
-			if((fds[0].revents & POLLIN) != 0) {
+			if((fds[0].revents & POLLOUT) != 0) {
 				message *msg = queue_dequeue(data->q_in);
 				if(msg != NULL) {
 					sendto(sd, msg, sizeof(message), 0, data->program_args->address, data->program_args->address_size);
@@ -250,11 +254,13 @@ void thread_networking(thread_data *data) {
 				}
 			}
 
-			if((fds[0].revents & POLLOUT) != 0) {
+			if((fds[0].revents & POLLIN) != 0) {
 				message *incoming_msg = malloc(sizeof(message));
 				recvfrom(sd, incoming_msg, sizeof(message), 0, NULL, NULL);
 				queue_enqueue(data->q_out, incoming_msg);
 			}
+
+			fds[0].revents = 0;
 		}
 	}
 }
