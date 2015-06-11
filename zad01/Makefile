@@ -34,7 +34,7 @@ else
     libdirs=${rllibdirs}
 endif
 
-cflags=-Wall -Wextra -std=c99 ${tflags} ${libs} ${include}
+cflags=-pthread -Wall -Wextra -std=c99 ${tflags} ${libs} ${include}
 comp=gcc ${cflags}
 ocomp=gcc -c ${cflags}
 
