@@ -14,13 +14,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <poll.h>
-#include <sys/un.h>
 
 #define IP_ADDR htonl(INADDR_ANY)
 #define UDP_PORT_BASE 2507
-#define UDP_PORT_COUNT 2
-
-#define UNIX_ADDR "./server"
+#define UDP_PORT_COUNT 1
 
 bool loop = true;
 
@@ -39,9 +36,8 @@ void addClient(struct sockaddr_in cli_addr){
 }
 
 int main() {
-  int recv_len, i, events, optval;
+  int recv_len, i, j, events;
   struct sockaddr_in addr, cli_addr;
-  struct sockaddr_un uaddr;
   socklen_t addr_len;
   struct sigaction act;
   char buf[HOST_NAME_MAX + 1];
@@ -53,7 +49,7 @@ int main() {
 
   memset(&ufds, 0, sizeof(ufds));
 
-  for (i = 0; i < 1; i++) {
+  for (i = 0; i < UDP_PORT_COUNT; i++) {
     if ((ufds[i].fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
       perror("socket(...) failed");
       exit(1);
@@ -68,30 +64,9 @@ int main() {
       perror("bind(...) failed");
       exit(1);
     }
+    
     ufds[i].events = POLLIN;
   }
-  {
-    if((ufds[1].fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1){
-      perror("socket(...) failed");
-      exit(1);
-    }
-    memset(&uaddr, 0, sizeof(uaddr));
-    optval = 1;
-    uaddr.sun_family = AF_UNIX;
-    strcpy(uaddr.sun_path, UNIX_ADDR);
-    unlink(uaddr.sun_path);
-    if(setsockopt(ufds[1].fd, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1){
-      perror("setsockopt(..., SO_PASSCRED, ...) failed");
-      exit(1);
-    }
-    if(bind(ufds[1].fd, (struct sockaddr *) &uaddr, sizeof(uaddr)) == -1){
-      perror("bind2(...) failed");
-      exit(1);
-    }
-    ufds[i].events = POLLIN;
-  } 
-
-
 
   printf("Waiting for connections at %s:[from %d to %d]...\n", inet_ntoa(addr.sin_addr), UDP_PORT_BASE, UDP_PORT_BASE + UDP_PORT_COUNT - 1);
 
@@ -108,7 +83,7 @@ int main() {
       exit(1);
     }
     else {
-      for (i = 0; events > 0 && i < UDP_PORT_COUNT ; i++) {
+      for (i = 0; events > 0 && i < UDP_PORT_COUNT; i++) {
         if (ufds[i].revents & POLLIN) {
           addr_len = sizeof(cli_addr);
           if ((recv_len = recvfrom(ufds[i].fd, buf, sizeof(buf), 0, (struct sockaddr *) &cli_addr, &addr_len)) == -1) {
