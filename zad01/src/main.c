@@ -35,6 +35,7 @@
 /*
  * @ToDo:
  * - synchronous signal handler
+ * - rewrite networking thread to poll for output and wait for signal when input
  */
 
 typedef struct {
@@ -138,9 +139,9 @@ typedef struct {
 
 short input_avaliable() {
 	struct pollfd fds[1];
-	fds[1].fd = STDIN_FILENO;
-	fds[1].events = POLLIN;
-	fds[1].revents = 0;
+	fds[0].fd = STDIN_FILENO;
+	fds[0].events = POLLIN;
+	fds[0].revents = 0;
 
 	poll(fds, 1, 0);
 
@@ -166,6 +167,7 @@ void print_all_pending_msgs(queue_t *q_out) {
 	while(msg = queue_dequeue(q_out), msg != NULL) {
 		at_least_one_printed = 1;
 		printf("[%s] %s", msg->from, msg->msg);
+		free(msg);
 	}
 
 	if(at_least_one_printed != 0) {
@@ -229,8 +231,31 @@ void *thread_io(void *_data) {
 }
 
 void thread_networking(thread_data *data) {
-	while(should_exit != 1) {
+	open_socket(&program_args);
 
+	struct pollfd fds[1];
+	fds[0].fd = sd;
+	fds[0].events = POLLIN | POLLOUT;
+	fds[0].revents = 0;
+
+	int ret = 0;
+	while(should_exit != 1) {
+		ret = poll(fds, 1, -1);
+		if(ret > 0) {
+			if((fds[0].revents & POLLIN) != 0) {
+				message *msg = queue_dequeue(data->q_in);
+				if(msg != NULL) {
+					sendto(sd, msg, sizeof(message), 0, data->program_args->address, data->program_args->address_size);
+					free(msg);
+				}
+			}
+
+			if((fds[0].revents & POLLOUT) != 0) {
+				message *incoming_msg = malloc(sizeof(message));
+				recvfrom(sd, incoming_msg, sizeof(message), 0, NULL, NULL);
+				queue_enqueue(data->q_out, incoming_msg);
+			}
+		}
 	}
 }
 
@@ -239,7 +264,6 @@ void thread_networking(thread_data *data) {
 
 int main(int argc, char **argv) {
 	process_arguments(argc, argv, &program_args);
-	open_socket(&program_args);
 
 	// create and initialize bounded queues
 	void* in_buffer[MSG_QUEUES_CAPACITY];
