@@ -145,7 +145,7 @@ void print_all_pending_msgs(queue_t *q_out) {
 	message *msg = NULL;
 	while(msg = queue_dequeue(q_out), msg != NULL) {
 		at_least_one_printed = 1;
-		printf("[%s] %s", msg->from, msg->msg);
+		printf("\n! [%s] %s\n", msg->from, msg->msg);
 		free(msg);
 	}
 
