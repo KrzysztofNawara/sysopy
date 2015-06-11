@@ -42,7 +42,7 @@ runbefore0:=${shell mkdir -p ${dbgtmpdir} ${rltmpdir} ${srcdir} ${dbgoutdir} ${r
 
 # ADD ALL NEW TARGET HERE AS WELL
 .PHONY : all
-all : exec.x 
+all : client.x
 
 .PHONY : clean
 clean:
@@ -69,7 +69,7 @@ ${tmpdir}%.o : ${srcdir}%.c
 # - copy this
 # - replace 'exe' with executable name
 # - remove 'main.o' compilation unit and add whatever you need 
-execo=${call o,main.o} # this is how you add compilation unit to link
-exec.x : ${execo}
+cliento=${call o,main.o} # this is how you add compilation unit to link
+client.x : ${cliento}
 	$(objectcomp)
 
