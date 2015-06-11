@@ -1,5 +1,5 @@
 
-#define _POSIX_C_SOURCE 200809L
+#include "config.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -14,20 +14,8 @@
 
 #include <pthread.h>
 
+#include "message.h"
 #include "queue.h"
-
-#define MODE_LOCAL 'l'
-#define MODE_REMOTE 'r'
-#define UNIX_SOCKET_PATH_MAX 108
-#define USERNAME_MAX 16
-#define MSG_LEN_MAX 128
-#define MIN_PORT 1024
-#define MAX_PORT 65535
-#define MSG_QUEUES_CAPACITY 64
-
-/* Interface */
-#define USR_CMD_EXIT "e\n"
-#define USR_CMD_TYPE "t\n"
 
 #define EXIT() exit(1);
 
@@ -124,15 +112,6 @@ void close_socket() {
 	close(sd);
 }
 
-
-
-/* ------------------------------- */
-
-typedef struct {
-	char from[USERNAME_MAX+1];
-	char msg[MSG_LEN_MAX+1];
-} message;
-
 /* ------------------------------- */
 
 short input_avaliable() {
@@ -208,7 +187,11 @@ void *thread_io(void *_data) {
 				should_exit = 1;
 			} else if(strcmp(buffer_for_user_input, USR_CMD_TYPE) == 0) {
 				print_content_query();
-				GET_LINE();
+				ssize_t read = GET_LINE();
+				if(read > 0) {
+					/* replace newline with null */
+					buffer_for_user_input[read-1] = '\0';
+				}
 
 				message *packed_msg = pack_message(data->program_args->username, buffer_for_user_input);
 				queue_enqueue(data->q_in, packed_msg);
