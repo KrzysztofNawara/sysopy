@@ -20,7 +20,7 @@
 #define UDP_PORT_BASE 2507
 #define UDP_PORT_COUNT 2
 
-#define UNIX_ADDR "./server"
+#define UNIX_ADDR "./unix_socket"
 
 bool loop = true;
 
