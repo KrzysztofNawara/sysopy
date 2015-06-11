@@ -1,4 +1,6 @@
-#define _XOPEN_SOURCE
+
+#include "config.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +17,8 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <sys/un.h>
+
+#include "message.h"
 
 #define IP_ADDR htonl(INADDR_ANY)
 #define UDP_PORT_BASE 2507
@@ -44,7 +48,7 @@ int main() {
   struct sockaddr_un uaddr;
   socklen_t addr_len;
   struct sigaction act;
-  char buf[HOST_NAME_MAX + 1];
+  message buf;
   struct pollfd ufds[UDP_PORT_COUNT];
 
   memset(&act, 0, sizeof(act));
@@ -109,9 +113,9 @@ int main() {
     }
     else {
       for (i = 0; events > 0 && i < UDP_PORT_COUNT ; i++) {
-        if (ufds[i].revents & POLLIN) {
+        if (ufds[i].revents & POLLIN) {t
           addr_len = sizeof(cli_addr);
-          if ((recv_len = recvfrom(ufds[i].fd, buf, sizeof(buf), 0, (struct sockaddr *) &cli_addr, &addr_len)) == -1) {
+          if ((recv_len = recvfrom(ufds[i].fd, &buf, sizeof(buf), 0, (struct sockaddr *) &cli_addr, &addr_len)) == -1) {
             if (errno == EINTR) {
               continue;
             }
@@ -120,13 +124,13 @@ int main() {
           }
           //      IF MESSAGE IS CLIENT REGISTERING, THEN 
           addClient(cli_addr);
-          printf("Got connection from %s:%d to port %d, received: %s\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port), UDP_PORT_BASE + i, buf);
+          printf("Got connection from %s:%d to port %d, received: %s from: %s\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port), UDP_PORT_BASE + i, buf.msg ,buf.from);
           //      ELSE SEND TO ALL1
           int j;
           for(j = 0; j < clientIterator; j++){
             printf("Sending to %s port %i\n", inet_ntoa(clientTab[j].sin_addr), ntohs(clientTab[j].sin_port));
             cli_addr = clientTab[j];
-            if (sendto(ufds[i].fd, buf, recv_len, 0, (struct sockaddr *) &cli_addr, addr_len) == -1) {
+            if (sendto(ufds[i].fd, &buf, recv_len, 0, (struct sockaddr *) &cli_addr, addr_len) == -1) {
               perror("sendto(...) failed");
               exit(1);
             }
