@@ -219,8 +219,25 @@ void *thread_io(void *_data) {
 	#undef GET_LINE
 }
 
+/*
+ * 0 - dana avaliable to write
+ * 1 - alarm has arrived
+ */
+volatile sig_atomic_t interrput_cause;
+
+void heartbeat(program_arguments *args) {
+	int buff = -11;
+	sendto(sd, &buff, sizeof(int), 0, args->address, args->address_size);
+}
+
+void reset_alarm() {
+	alarm( ((TIMEOUT_SEC/5) > 0) ? (TIMEOUT_SEC/5) : 1 );
+}
+
 void thread_networking(thread_data *data) {
 	open_socket(&program_args);
+	heartbeat(data->program_args);
+	reset_alarm();
 
 	struct pollfd poll_receiving[1];
 	poll_receiving[0].fd = sd;
@@ -237,10 +254,16 @@ void thread_networking(thread_data *data) {
 
 			poll_receiving[0].revents = 0;
 		} else if (ret == -1 && errno == EINTR) {
-			message *msg;
-			while(msg = queue_dequeue(data->q_in), msg != NULL) {
-				sendto(sd, msg, sizeof(message), 0, data->program_args->address, data->program_args->address_size);
-				free(msg);
+			if(interrput_cause == 0) {
+				message *msg;
+				while (msg = queue_dequeue(data->q_in), msg != NULL) {
+					sendto(sd, msg, sizeof(message), 0, data->program_args->address, data->program_args->address_size);
+					reset_alarm();
+					free(msg);
+				}
+			} else if(interrput_cause == 1) {
+				heartbeat(data->program_args);
+				reset_alarm();
 			}
 		}
 	}
@@ -248,8 +271,12 @@ void thread_networking(thread_data *data) {
 
 /* ------------------------------- */
 
-void dummy(int sig) {
+void datainterrupt(int sig) {
+	interrput_cause = 0;
+}
 
+void sigalarm(int sig) {
+	interrput_cause = 1;
 }
 
 int main(int argc, char **argv) {
@@ -280,13 +307,20 @@ int main(int argc, char **argv) {
 	sigset_t usr2;
 	sigemptyset(&usr2);
 	sigaddset(&usr2, SIGUSR2);
+	sigaddset(&usr2, SIGALRM);
 	pthread_sigmask(SIG_UNBLOCK, &usr2, NULL);
 	/* I don't want SIGUSR2 to kill my application but to interrupt poll */
-	struct sigaction dummy_sighandler;
-	dummy_sighandler.sa_handler = &dummy;
-	dummy_sighandler.sa_mask = all;
-	dummy_sighandler.sa_flags = 0;
-	sigaction(SIGUSR2, &dummy_sighandler, NULL);
+	struct sigaction data_sigh;
+	data_sigh.sa_handler = &datainterrupt;
+	data_sigh.sa_mask = all;
+	data_sigh.sa_flags = 0;
+	sigaction(SIGUSR2, &data_sigh, NULL);
+
+	struct sigaction alarm_sigh;
+	alarm_sigh.sa_handler = &sigalarm;
+	alarm_sigh.sa_mask = all;
+	alarm_sigh.sa_flags = 0;
+	sigaction(SIGALRM, &alarm_sigh, NULL);
 
 	thread_networking(&data);
 
