@@ -18,6 +18,7 @@
 #include <sys/un.h>
 
 #include "message.h"
+#include "sockaddr_cmp.h"
 
 #define IP_ADDR htonl(INADDR_ANY)
 #define UDP_PORT_BASE 2507
@@ -52,6 +53,16 @@ void addClient(struct sockaddr *cli_addr, socklen_t size, int desc) {
     clientSizes[clientIterator] = size;
     clientDesc[clientIterator] = desc;
     clientIterator++;
+}
+
+short clientPresent(struct sockaddr *cli_addr) {
+    for(int i = 0; i < clientIterator; i++) {
+        if(sockaddr_cmp(cli_addr, clientTab[i]) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 int main() {
@@ -149,7 +160,9 @@ int main() {
                         exit(1);
                     }
                     //      IF MESSAGE IS CLIENT REGISTERING, THEN
-                    addClient(cli_addr, actual_length, ufds[i].fd);
+                    if(clientPresent(cli_addr) == 0) {
+                        addClient(cli_addr, actual_length, ufds[i].fd);
+                    }
                     //printf("Got connection from %s:%d to port %d, received: %s from: %s\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port), UDP_PORT_BASE + i, buf.msg ,buf.from);
                     printf("Received: %s from: %s\n", buf.msg, buf.from);
                     //      ELSE SEND TO ALL1
