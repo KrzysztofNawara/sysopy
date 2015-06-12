@@ -173,7 +173,7 @@ int main() {
                         actual_length = clientSizes[j];
                         if (sendto(clientDesc[j], &buf, recv_len, 0, cli_addr, actual_length) == -1) {
                             perror("sendto(...) failed");
-                            exit(1);
+                            //exit(1);
                         }
                     }
                     events--;
