@@ -13,6 +13,8 @@
 #include <poll.h>
 
 #include <pthread.h>
+#include <signal.h>
+#include <errno.h>
 
 #include "message.h"
 #include "queue.h"
@@ -174,6 +176,7 @@ typedef struct {
 	program_arguments *program_args;
 	queue_t *q_in;
 	queue_t *q_out;
+	pthread_t networking_thread;
 } thread_data;
 
 void *thread_io(void *_data) {
@@ -191,6 +194,7 @@ void *thread_io(void *_data) {
 			if(strcmp(buffer_for_user_input, USR_CMD_EXIT) == 0) {
 				print_all_pending_msgs(data->q_out);
 				should_exit = 1;
+				pthread_kill(data->networking_thread, SIGUSR2);
 			} else if(strcmp(buffer_for_user_input, USR_CMD_TYPE) == 0) {
 				print_content_query();
 				ssize_t read = GET_LINE();
@@ -201,6 +205,7 @@ void *thread_io(void *_data) {
 
 				message *packed_msg = pack_message(data->program_args->username, buffer_for_user_input);
 				queue_enqueue(data->q_in, packed_msg);
+				pthread_kill(data->networking_thread, SIGUSR2);
 
 				print_command_prompt();
 			} else {
@@ -217,38 +222,43 @@ void *thread_io(void *_data) {
 void thread_networking(thread_data *data) {
 	open_socket(&program_args);
 
-	struct pollfd fds[1];
-	fds[0].fd = sd;
-	fds[0].events = POLLIN | POLLOUT;
-	fds[0].revents = 0;
+	struct pollfd poll_receiving[1];
+	poll_receiving[0].fd = sd;
+	poll_receiving[0].events = POLLIN;
+	poll_receiving[0].revents = 0;
 
 	int ret = 0;
 	while(should_exit != 1) {
-		ret = poll(fds, 1, -1);
-		if(ret > 0) {
-			if((fds[0].revents & POLLOUT) != 0) {
-				message *msg = queue_dequeue(data->q_in);
-				if(msg != NULL) {
-					sendto(sd, msg, sizeof(message), 0, data->program_args->address, data->program_args->address_size);
-					free(msg);
-				}
-			}
+		ret = poll(poll_receiving, 1, -1);
+		if(ret > 0 && (poll_receiving[0].revents & POLLIN) != 0) {
+			message *incoming_msg = malloc(sizeof(message));
+			recvfrom(sd, incoming_msg, sizeof(message), 0, NULL, NULL);
+			queue_enqueue(data->q_out, incoming_msg);
 
-			if((fds[0].revents & POLLIN) != 0) {
-				message *incoming_msg = malloc(sizeof(message));
-				recvfrom(sd, incoming_msg, sizeof(message), 0, NULL, NULL);
-				queue_enqueue(data->q_out, incoming_msg);
+			poll_receiving[0].revents = 0;
+		} else if (ret == -1 && errno == EINTR) {
+			message *msg;
+			while(msg = queue_dequeue(data->q_in), msg != NULL) {
+				sendto(sd, msg, sizeof(message), 0, data->program_args->address, data->program_args->address_size);
+				free(msg);
 			}
-
-			fds[0].revents = 0;
 		}
 	}
 }
 
 /* ------------------------------- */
 
+void dummy(int sig) {
+
+}
 
 int main(int argc, char **argv) {
+	sigset_t all;
+	sigfillset(&all);
+	sigdelset(&all, SIGTERM);
+	sigdelset(&all, SIGCHLD);
+	pthread_sigmask(SIG_SETMASK, &all, NULL);
+
 	process_arguments(argc, argv, &program_args);
 
 	// create and initialize bounded queues
@@ -261,9 +271,22 @@ int main(int argc, char **argv) {
 	data.program_args = &program_args;
 	data.q_in = &q_in;
 	data.q_out = &q_out;
+	data.networking_thread = pthread_self();
 
 	pthread_t io_thread;
 	pthread_create(&io_thread, NULL, &thread_io, &data);
+
+	/* for networking thread we want SIGUSR2 unlocked */
+	sigset_t usr2;
+	sigemptyset(&usr2);
+	sigaddset(&usr2, SIGUSR2);
+	pthread_sigmask(SIG_UNBLOCK, &usr2, NULL);
+	/* I don't want SIGUSR2 to kill my application but to interrupt poll */
+	struct sigaction dummy_sighandler;
+	dummy_sighandler.sa_handler = &dummy;
+	dummy_sighandler.sa_mask = all;
+	dummy_sighandler.sa_flags = 0;
+	sigaction(SIGUSR2, &dummy_sighandler, NULL);
 
 	thread_networking(&data);
 
