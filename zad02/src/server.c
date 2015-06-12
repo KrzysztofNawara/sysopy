@@ -24,6 +24,7 @@
 #define IP_ADDR htonl(INADDR_ANY)
 #define PORT 2507
 
+#define SS_BACKLOG 16
 #define UNIX_ADDR "./unix_socket"
 #define INIT_DESC 4 /* must be > 2 */
 
@@ -112,6 +113,10 @@ int main() {
     /* set sockets state to non-blocking - this will prevent accept() from blocking */
     fcntl(inet_listen, F_SETFL, O_NONBLOCK);
     fcntl(unix_listen, F_SETFL, O_NONBLOCK);
+
+    /* mark sockets using listen */
+    listen(inet_listen, SS_BACKLOG);
+    listen(unix_listen, SS_BACKLOG);
 
     /* add sockets to polling queue */
     ufds[0].fd = inet_listen;
