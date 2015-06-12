@@ -2,8 +2,8 @@ outdir:=bin/
 sourcedir:=src/
 
 all:
-	gcc -pthread ${sourcedir}client.c ${sourcedir}sockaddr_cmp.c -Wall -o ${outdir}client
-	gcc ${sourcedir}server.c -Wall -o ${outdir}server
+	gcc -std=c99 -pthread ${sourcedir}client.c -Wall -Wextra -o ${outdir}client
+	gcc -std=c99 ${sourcedir}server.c ${sourcedir}sockaddr_cmp.c -Wall -Wextra -o ${outdir}server
 
 clean:
 	rm -f ${outdir}client ${outdir}server
