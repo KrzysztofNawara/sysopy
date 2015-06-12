@@ -175,17 +175,24 @@ int main() {
                         exit(1);
                     }
 
-                    printf("Received: %s from: %s\n", buf.msg, buf.from);
-                    //      ELSE SEND TO ALL1
+                    if(recv_len == 0) {
+                        /* socket was ready and yet no data read - it has be closed remotely */
+                        printf("Client disconnected\n");
+                        ufds[i].fd *= -1;
+                    } else {
+                        printf("Received: %s from: %s\n", buf.msg, buf.from);
+                        //      ELSE SEND TO ALL1
 
-                    for (int j = 2; j < clientIterator; j++) {
-                        if(ufds[j].fd >= 0) {
-                            if (send(ufds[j].fd, &buf, recv_len, 0) == -1) {
-                                perror("sendto(...) failed");
-                                exit(1);
+                        for (int j = 2; j < clientIterator; j++) {
+                            if(ufds[j].fd >= 0) {
+                                if (send(ufds[j].fd, &buf, recv_len, 0) == -1) {
+                                    perror("sendto(...) failed");
+                                    exit(1);
+                                }
                             }
                         }
                     }
+
                     events--;
                 }
             }
@@ -194,7 +201,7 @@ int main() {
 
     printf("Shutting down...\n");
 
-    for (i = 0; i < clientIterator; i++) {
+    for (int i = clientIterator - 1; i >= 0; i--) {
         if (close(ufds[i].fd) == -1) {
             perror("close(...) failed");
             exit(1);

@@ -231,10 +231,21 @@ void thread_networking(thread_data *data) {
 	int ret = 0;
 	while(should_exit != 1) {
 		ret = poll(poll_receiving, 1, -1);
-		if(ret > 0 && (poll_receiving[0].revents & POLLIN) != 0) {
+		if(ret > 0 && (poll_receiving[0].revents & POLLHUP) != 0) {
+			printf("Server disconnected\n");
+			poll_receiving[0].fd *= -1;
+			should_exit = 1;
+		} else if(ret > 0 && (poll_receiving[0].revents & POLLIN) != 0) {
 			message *incoming_msg = malloc(sizeof(message));
-			recv(sd, incoming_msg, sizeof(message), 0);
-			queue_enqueue(data->q_out, incoming_msg);
+			ssize_t  read = recv(sd, incoming_msg, sizeof(message), 0);
+
+			if(read == 0) {
+				printf("\n***\nServer disconnected\n");
+				poll_receiving[0].fd *= -1;
+				should_exit = 1;
+			} else {
+				queue_enqueue(data->q_out, incoming_msg);
+			}
 
 			poll_receiving[0].revents = 0;
 		} else if (ret == -1 && errno == EINTR) {
@@ -243,9 +254,6 @@ void thread_networking(thread_data *data) {
 				send(sd, msg, sizeof(message), 0);
 				free(msg);
 			}
-		} else if(ret > 0 && (poll_receiving[0].revents & POLLHUP) != 0) {
-			printf("Server disconnected\n");
-			should_exit = 1;
 		}
 	}
 }
