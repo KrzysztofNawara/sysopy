@@ -21,20 +21,79 @@
 #include "message.h"
 #include "sockaddr_cmp.h"
 
-#define IP_ADDR htonl(INADDR_ANY)
-#define PORT 2507
+//#define IP_ADDR htonl(INADDR_ANY)
+//#define PORT 2507
 
 #define SS_BACKLOG 16
 #define UNIX_ADDR "./unix_socket"
 #define INIT_DESC 4 /* must be > 2 */
 
-bool loop = true;
+typedef struct {
+    struct sockaddr_un unix_socket_addr;
+    struct sockaddr_in inet_socket_addr;
+    char *hr_up;
+    char *hr_ip;
+    char *hr_p;
+} application_arguments;
+
+application_arguments prog_args;
+
+/*
+ * Order of arguments:
+ * - unix port name
+ * - ip
+ * - port
+ */
+void process_application_arguments(int argc, char **argv, application_arguments *args) {
+    if(argc < 3) {
+        printf("Too few argument, 3 required: <unix_socket_path> <ip> <port>\n");
+        exit(1);
+    }
+
+    /* store them for later (in case I neeed them in debug messages) */
+    args->hr_up = argv[1];
+    args->hr_ip = argv[2];
+    args->hr_p = argv[3];
+
+    /* UNIX domain socket */
+    char *unix_socket_path = argv[1];
+    int path_len = strlen(unix_socket_path);
+
+    if(path_len > UNIX_SOCKET_PATH_MAX) {
+        printf("Socket path too long\n");
+        exit(1);
+    }
+
+    args->unix_socket_addr.sun_family = AF_UNIX;
+    strcpy(args->unix_socket_addr.sun_path, unix_socket_path);
+
+    /* internet domain socket */
+    args->inet_socket_addr.sin_family = AF_INET;
+    int ret = inet_pton(AF_INET, argv[2], &(args->inet_socket_addr.sin_addr));
+    if(ret != 1) {
+        printf("Wrong IP format\n");
+        exit(1);
+    }
+
+    long unvalidated_port = strtol(argv[3], NULL, 10);
+    if(unvalidated_port < MIN_PORT || unvalidated_port > MAX_PORT) {
+        printf("Wrong port\n");
+        exit(1);
+    }
+    args->inet_socket_addr.sin_port = htons((in_port_t)unvalidated_port);
+}
+
+/* -------------------------------------- */
+
+volatile bool loop = true;
 
 void sigint_handler(int signo) {
     char msg[] = "\nSIGINT received...\n";
     write(STDOUT_FILENO, msg, strlen(msg));
     loop = false;
 }
+
+/* -------------------------------------- */
 
 int clientCapacity = 2;
 struct pollfd *ufds = NULL;
@@ -52,7 +111,12 @@ void addClient(int desc) {
     clientIterator++;
 }
 
-int main() {
+/* -------------------------------------- */
+
+
+int main(int argc, char **argv) {
+    process_application_arguments(argc, argv, &prog_args);
+
     int recv_len, i, events, optval;
 
     socklen_t how_much_for_address = 0;
@@ -66,13 +130,8 @@ int main() {
         }
     }
 
-    struct sockaddr *cli_addr = NULL;
-    struct sockaddr_in addr;
-    struct sockaddr_un uaddr;
-    socklen_t addr_len;
-    struct sigaction act;
-    message buf;
 
+    struct sigaction act;
     memset(&act, 0, sizeof(act));
     act.sa_handler = sigint_handler;
     sigaction(SIGINT, &act, NULL);
@@ -82,30 +141,22 @@ int main() {
     /* create UNIX and INET listen sockets */
     int inet_listen = socket(AF_INET, SOCK_STREAM, 0);
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
-    addr.sin_addr.s_addr = IP_ADDR;
-
-    if (bind(inet_listen, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
+    if (bind(inet_listen, (struct sockaddr *) &(prog_args.inet_socket_addr), sizeof(prog_args.inet_socket_addr)) == -1) {
         perror("bind(...) failed");
         exit(1);
     }
 
     int unix_listen = socket(AF_UNIX, SOCK_STREAM, 0);
 
-    memset(&uaddr, 0, sizeof(uaddr));
-    uaddr.sun_family = AF_UNIX;
-    strcpy(uaddr.sun_path, UNIX_ADDR);
+    unlink(prog_args.unix_socket_addr.sun_path);
 
     optval = 1;
-    unlink(uaddr.sun_path);
     if (setsockopt(unix_listen, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
         perror("setsockopt(..., SO_PASSCRED, ...) failed");
         exit(1);
     }
 
-    if (bind(unix_listen, (struct sockaddr *) &uaddr, sizeof(uaddr)) == -1) {
+    if (bind(unix_listen, (struct sockaddr *) &(prog_args.unix_socket_addr), sizeof(prog_args.inet_socket_addr)) == -1) {
         perror("bind2(...) failed");
         exit(1);
     }
@@ -127,8 +178,10 @@ int main() {
     ufds[1].events = POLLIN;
     ufds[1].revents = 0;
 
-    printf("Waiting for connections at %s:[%d]...\n", inet_ntoa(addr.sin_addr), PORT);
+    printf("Waiting for connections at %s:[%s] and %s\n", prog_args.hr_ip, prog_args.hr_p, prog_args.hr_up);
 
+    struct sockaddr *cli_addr = NULL;
+    message buf;
     while (loop) {
         if ((events = poll(ufds, clientIterator, 2500)) == 0) {
             printf("Timeout, but no events!\n");
