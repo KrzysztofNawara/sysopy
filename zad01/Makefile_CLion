@@ -69,7 +69,11 @@ ${tmpdir}%.o : ${srcdir}%.c
 # - copy this
 # - replace 'exe' with executable name
 # - remove 'main.o' compilation unit and add whatever you need 
-cliento=${call o,main.o} # this is how you add compilation unit to link
+cliento=${call o,client.o} # this is how you add compilation unit to link
 client.x : ${cliento}
+	$(objectcomp)
+
+servero=${call o,server.o} # this is how you add compilation unit to link
+server.x : ${servero}
 	$(objectcomp)
 

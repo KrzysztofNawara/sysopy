@@ -17,4 +17,5 @@ add_executable(dummy ${SOURCE_FILES})
 
 #INCLUDE_DIRECTORIES(...)
 
-add_custom_target(client.x+debug make -C ${PROJECT_SOURCE_DIR} client.x debug=1)
+add_custom_target(client.x+debug make -C ${PROJECT_SOURCE_DIR} -f Makefile_CLion client.x debug=1)
+add_custom_target(server.x+debug make -C ${PROJECT_SOURCE_DIR} -f Makefile_CLion server.x debug=1)
