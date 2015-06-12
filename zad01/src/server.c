@@ -20,14 +20,71 @@
 #include "message.h"
 #include "sockaddr_cmp.h"
 
-#define IP_ADDR htonl(INADDR_ANY)
-#define UDP_PORT_BASE 2507
-#define UDP_PORT_COUNT 2
+//#define IP_ADDR htonl(INADDR_ANY)
+//#define PORT 2507
 
-#define UNIX_ADDR "./unix_socket"
+/*#define SS_BACKLOG 16*/
+/*#define UNIX_ADDR "./unix_socket"*/
 #define INIT_CLIENTS 2
 
-bool loop = true;
+typedef struct {
+    struct sockaddr_un unix_socket_addr;
+    struct sockaddr_in inet_socket_addr;
+    char *hr_up;
+    char *hr_ip;
+    char *hr_p;
+} application_arguments;
+
+application_arguments prog_args;
+
+/*
+ * Order of arguments:
+ * - unix port name
+ * - ip
+ * - port
+ */
+void process_application_arguments(int argc, char **argv, application_arguments *args) {
+    if(argc < 3) {
+        printf("Too few argument, 3 required: <unix_socket_path> <ip> <port>\n");
+        exit(1);
+    }
+
+    /* store them for later (in case I neeed them in debug messages) */
+    args->hr_up = argv[1];
+    args->hr_ip = argv[2];
+    args->hr_p = argv[3];
+
+    /* UNIX domain socket */
+    char *unix_socket_path = argv[1];
+    int path_len = strlen(unix_socket_path);
+
+    if(path_len > UNIX_SOCKET_PATH_MAX) {
+        printf("Socket path too long\n");
+        exit(1);
+    }
+
+    args->unix_socket_addr.sun_family = AF_UNIX;
+    strcpy(args->unix_socket_addr.sun_path, unix_socket_path);
+
+    /* internet domain socket */
+    args->inet_socket_addr.sin_family = AF_INET;
+    int ret = inet_pton(AF_INET, argv[2], &(args->inet_socket_addr.sin_addr));
+    if(ret != 1) {
+        printf("Wrong IP format\n");
+        exit(1);
+    }
+
+    long unvalidated_port = strtol(argv[3], NULL, 10);
+    if(unvalidated_port < MIN_PORT || unvalidated_port > MAX_PORT) {
+        printf("Wrong port\n");
+        exit(1);
+    }
+    args->inet_socket_addr.sin_port = htons((in_port_t)unvalidated_port);
+}
+
+/* -------------------------------------- */
+
+volatile bool loop = true;
 
 void sigint_handler(int signo) {
     char msg[] = "\nSIGINT received...\n";
@@ -65,7 +122,9 @@ short clientPresent(struct sockaddr *cli_addr) {
     return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    process_application_arguments(argc, argv, &prog_args);
+
     int recv_len, i, events, optval;
 
     socklen_t how_much_for_address = 0;
@@ -79,64 +138,61 @@ int main() {
         }
     }
 
-    struct sockaddr *cli_addr = NULL;
-    struct sockaddr_in addr;
-    struct sockaddr_un uaddr;
-    socklen_t addr_len;
     struct sigaction act;
-    message buf;
-    struct pollfd ufds[UDP_PORT_COUNT];
-
     memset(&act, 0, sizeof(act));
     act.sa_handler = sigint_handler;
     sigaction(SIGINT, &act, NULL);
 
+    message buf;
+    struct pollfd ufds[2];
     memset(&ufds, 0, sizeof(ufds));
 
-    for (i = 0; i < 1; i++) {
-        if ((ufds[i].fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-            perror("socket(...) failed");
-            exit(1);
-        }
+    /* create UNIX and INET sockets */
+    int inet_socket;
+    int unix_socket;
 
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(UDP_PORT_BASE + i);
-        addr.sin_addr.s_addr = IP_ADDR;
-
-        if (bind(ufds[i].fd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
-            perror("bind(...) failed");
-            exit(1);
-        }
-        ufds[i].events = POLLIN;
-    }
-    {
-        if ((ufds[1].fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1) {
-            perror("socket(...) failed");
-            exit(1);
-        }
-        memset(&uaddr, 0, sizeof(uaddr));
-        optval = 1;
-        uaddr.sun_family = AF_UNIX;
-        strcpy(uaddr.sun_path, UNIX_ADDR);
-        unlink(uaddr.sun_path);
-        if (setsockopt(ufds[1].fd, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
-            perror("setsockopt(..., SO_PASSCRED, ...) failed");
-            exit(1);
-        }
-        if (bind(ufds[1].fd, (struct sockaddr *) &uaddr, sizeof(uaddr)) == -1) {
-            perror("bind2(...) failed");
-            exit(1);
-        }
-        ufds[i].events = POLLIN;
+    if ((inet_socket = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+        perror("socket(...) failed");
+        exit(1);
     }
 
+    if (bind(inet_socket, (struct sockaddr *) &(prog_args.inet_socket_addr), sizeof(prog_args.inet_socket_addr)) == -1) {
+        perror("bind(...) failed");
+        exit(1);
+    }
 
-    printf("Waiting for connections at %s:[from %d to %d]...\n", inet_ntoa(addr.sin_addr), UDP_PORT_BASE,
-           UDP_PORT_BASE + UDP_PORT_COUNT - 1);
+    if ((unix_socket = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1) {
+        perror("socket(...) failed");
+        exit(1);
+    }
 
+    unlink(prog_args.unix_socket_addr.sun_path);
+
+    optval = 1;
+    if (setsockopt(unix_socket, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
+        perror("setsockopt(..., SO_PASSCRED, ...) failed");
+        exit(1);
+    }
+
+    if (bind(unix_socket, (struct sockaddr *) &(prog_args.unix_socket_addr), sizeof(prog_args.inet_socket_addr)) == -1) {
+        perror("bind2(...) failed");
+        exit(1);
+    }
+
+    /* add sockets to polling queue */
+    ufds[0].fd = inet_socket;
+    ufds[0].events = POLLIN;
+    ufds[0].revents = 0;
+
+    ufds[1].fd = unix_socket;
+    ufds[1].events = POLLIN;
+    ufds[1].revents = 0;
+
+    printf("Waiting for connections at %s:[%s] and %s\n", prog_args.hr_ip, prog_args.hr_p, prog_args.hr_up);
+
+    struct sockaddr *cli_addr = NULL;
     while (loop) {
-        if ((events = poll(ufds, UDP_PORT_COUNT, 2500)) == 0) {
+        if ((events = poll(ufds, 2, 2500)) == 0) {
             printf("Timeout, but no events!\n");
             continue;
         }
@@ -148,7 +204,7 @@ int main() {
             exit(1);
         }
         else {
-            for (i = 0; events > 0 && i < UDP_PORT_COUNT; i++) {
+            for (i = 0; events > 0 && i < 2; i++) {
                 if (ufds[i].revents & POLLIN) {
                     cli_addr = calloc(how_much_for_address, 1);
                     socklen_t actual_length = how_much_for_address;
@@ -173,7 +229,7 @@ int main() {
                         actual_length = clientSizes[j];
                         if (sendto(clientDesc[j], &buf, recv_len, 0, cli_addr, actual_length) == -1) {
                             perror("sendto(...) failed");
-                            //exit(1);
+                            exit(1);
                         }
                     }
                     events--;
@@ -184,7 +240,8 @@ int main() {
 
     printf("Shutting down...\n");
 
-    for (i = 0; i < UDP_PORT_COUNT; i++) {
+    /* two sockets to close - 0 and 1 */
+    for (int i = 1; i >= 0; i--) {
         if (close(ufds[i].fd) == -1) {
             perror("close(...) failed");
             exit(1);
