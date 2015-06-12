@@ -16,16 +16,16 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <sys/un.h>
+#include <fcntl.h>
 
 #include "message.h"
 #include "sockaddr_cmp.h"
 
 #define IP_ADDR htonl(INADDR_ANY)
-#define UDP_PORT_BASE 2507
-#define UDP_PORT_COUNT 2
+#define PORT 2507
 
 #define UNIX_ADDR "./unix_socket"
-#define INIT_CLIENTS 2
+#define INIT_DESC 4 /* must be > 2 */
 
 bool loop = true;
 
@@ -35,34 +35,20 @@ void sigint_handler(int signo) {
     loop = false;
 }
 
-int clientCapacity = 0;
-struct sockaddr **clientTab = NULL;
-socklen_t *clientSizes = NULL;
-int *clientDesc = NULL;
-int clientIterator = 0;
+int clientCapacity = 2;
+struct pollfd *ufds = NULL;
+int clientIterator = 2;
 
-void addClient(struct sockaddr *cli_addr, socklen_t size, int desc) {
+void addClient(int desc) {
     if(clientIterator >= clientCapacity) {
-        clientCapacity = (clientCapacity > 0) ? 2*clientCapacity : INIT_CLIENTS;
-        clientTab = realloc(clientTab, sizeof(struct sockaddr*)*clientCapacity);
-        clientSizes = realloc(clientSizes, sizeof(socklen_t)*clientCapacity);
-        clientDesc = realloc(clientDesc, sizeof(int)*clientCapacity);
+        clientCapacity = (clientCapacity > 0) ? 2*clientCapacity : INIT_DESC;
+        ufds = realloc(ufds, sizeof(struct pollfd)*clientCapacity);
     }
 
-    clientTab[clientIterator] = cli_addr;
-    clientSizes[clientIterator] = size;
-    clientDesc[clientIterator] = desc;
+    ufds[clientIterator].fd = desc;
+    ufds[clientIterator].events = POLLIN;
+    ufds[clientIterator].revents = 0;
     clientIterator++;
-}
-
-short clientPresent(struct sockaddr *cli_addr) {
-    for(int i = 0; i < clientIterator; i++) {
-        if(sockaddr_cmp(cli_addr, clientTab[i]) == 0) {
-            return 1;
-        }
-    }
-
-    return 0;
 }
 
 int main() {
@@ -85,58 +71,61 @@ int main() {
     socklen_t addr_len;
     struct sigaction act;
     message buf;
-    struct pollfd ufds[UDP_PORT_COUNT];
 
     memset(&act, 0, sizeof(act));
     act.sa_handler = sigint_handler;
     sigaction(SIGINT, &act, NULL);
 
-    memset(&ufds, 0, sizeof(ufds));
+    ufds = calloc(sizeof(struct pollfd), 2);
 
-    for (i = 0; i < 1; i++) {
-        if ((ufds[i].fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-            perror("socket(...) failed");
-            exit(1);
-        }
+    /* create UNIX and INET listen sockets */
+    int inet_listen = socket(AF_INET, SOCK_STREAM, 0);
 
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(UDP_PORT_BASE + i);
-        addr.sin_addr.s_addr = IP_ADDR;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = IP_ADDR;
 
-        if (bind(ufds[i].fd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
-            perror("bind(...) failed");
-            exit(1);
-        }
-        ufds[i].events = POLLIN;
-    }
-    {
-        if ((ufds[1].fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1) {
-            perror("socket(...) failed");
-            exit(1);
-        }
-        memset(&uaddr, 0, sizeof(uaddr));
-        optval = 1;
-        uaddr.sun_family = AF_UNIX;
-        strcpy(uaddr.sun_path, UNIX_ADDR);
-        unlink(uaddr.sun_path);
-        if (setsockopt(ufds[1].fd, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
-            perror("setsockopt(..., SO_PASSCRED, ...) failed");
-            exit(1);
-        }
-        if (bind(ufds[1].fd, (struct sockaddr *) &uaddr, sizeof(uaddr)) == -1) {
-            perror("bind2(...) failed");
-            exit(1);
-        }
-        ufds[i].events = POLLIN;
+    if (bind(inet_listen, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
+        perror("bind(...) failed");
+        exit(1);
     }
 
+    int unix_listen = socket(AF_UNIX, SOCK_STREAM, 0);
 
-    printf("Waiting for connections at %s:[from %d to %d]...\n", inet_ntoa(addr.sin_addr), UDP_PORT_BASE,
-           UDP_PORT_BASE + UDP_PORT_COUNT - 1);
+    memset(&uaddr, 0, sizeof(uaddr));
+    uaddr.sun_family = AF_UNIX;
+    strcpy(uaddr.sun_path, UNIX_ADDR);
+
+    optval = 1;
+    unlink(uaddr.sun_path);
+    if (setsockopt(unix_listen, SOL_SOCKET, SO_PASSCRED, &optval, sizeof(optval)) == -1) {
+        perror("setsockopt(..., SO_PASSCRED, ...) failed");
+        exit(1);
+    }
+
+    if (bind(unix_listen, (struct sockaddr *) &uaddr, sizeof(uaddr)) == -1) {
+        perror("bind2(...) failed");
+        exit(1);
+    }
+
+    /* set sockets state to non-blocking - this will prevent accept() from blocking */
+    fcntl(inet_listen, F_SETFL, O_NONBLOCK);
+    fcntl(unix_listen, F_SETFL, O_NONBLOCK);
+
+    /* add sockets to polling queue */
+    ufds[0].fd = inet_listen;
+    ufds[0].events = POLLIN;
+    ufds[0].revents = 0;
+
+    ufds[1].fd = unix_listen;
+    ufds[1].events = POLLIN;
+    ufds[1].revents = 0;
+
+    printf("Waiting for connections at %s:[%d]...\n", inet_ntoa(addr.sin_addr), PORT);
 
     while (loop) {
-        if ((events = poll(ufds, UDP_PORT_COUNT, 2500)) == 0) {
+        if ((events = poll(ufds, clientIterator, 2500)) == 0) {
             printf("Timeout, but no events!\n");
             continue;
         }
@@ -148,30 +137,37 @@ int main() {
             exit(1);
         }
         else {
-            for (i = 0; events > 0 && i < UDP_PORT_COUNT; i++) {
+            /* first, check listening ports if somebody does not want to connect */
+            int res = -1;
+            i = 0;
+            for(; i < 2; i++) {
+                res = accept(ufds[i].fd, NULL, NULL);
+                if(res > 0) {
+                    /* new client connected! */
+                    addClient(res);
+                } else if(res == -1 && errno != EWOULDBLOCK && errno != EAGAIN) {
+                    perror("accept(...) failed");
+                    exit(1);
+                }
+            }
+
+            /* now check the rest for ordinary transmission requests */
+
+            for (; i < clientIterator; i++) {
                 if (ufds[i].revents & POLLIN) {
-                    cli_addr = calloc(how_much_for_address, 1);
-                    socklen_t actual_length = how_much_for_address;
-                    if ((recv_len = recvfrom(ufds[i].fd, &buf, sizeof(buf), 0, cli_addr, &actual_length)) == -1) {
+                    if ((recv_len = recv(ufds[i].fd, &buf, sizeof(buf), 0)) == -1) {
                         if (errno == EINTR) {
                             continue;
                         }
                         perror("recvfrom(...) failed");
                         exit(1);
                     }
-                    //      IF MESSAGE IS CLIENT REGISTERING, THEN
-                    if(clientPresent(cli_addr) == 0) {
-                        addClient(cli_addr, actual_length, ufds[i].fd);
-                    }
-                    //printf("Got connection from %s:%d to port %d, received: %s from: %s\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port), UDP_PORT_BASE + i, buf.msg ,buf.from);
+
                     printf("Received: %s from: %s\n", buf.msg, buf.from);
                     //      ELSE SEND TO ALL1
-                    int j;
-                    for (j = 0; j < clientIterator; j++) {
-                        // printf("Sending to %s port %i\n", inet_ntoa(clientTab[j].sin_addr), ntohs(clientTab[j].sin_port));
-                        cli_addr = clientTab[j];
-                        actual_length = clientSizes[j];
-                        if (sendto(clientDesc[j], &buf, recv_len, 0, cli_addr, actual_length) == -1) {
+
+                    for (int j = 2; j < clientIterator; j++) {
+                        if (send(ufds[j].fd, &buf, recv_len, 0) == -1) {
                             perror("sendto(...) failed");
                             exit(1);
                         }
@@ -184,7 +180,7 @@ int main() {
 
     printf("Shutting down...\n");
 
-    for (i = 0; i < UDP_PORT_COUNT; i++) {
+    for (i = 0; i < clientIterator; i++) {
         if (close(ufds[i].fd) == -1) {
             perror("close(...) failed");
             exit(1);
