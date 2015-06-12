@@ -113,7 +113,7 @@ int main() {
     }
     else {
       for (i = 0; events > 0 && i < UDP_PORT_COUNT ; i++) {
-        if (ufds[i].revents & POLLIN) {t
+        if (ufds[i].revents & POLLIN) {
           addr_len = sizeof(cli_addr);
           if ((recv_len = recvfrom(ufds[i].fd, &buf, sizeof(buf), 0, (struct sockaddr *) &cli_addr, &addr_len)) == -1) {
             if (errno == EINTR) {

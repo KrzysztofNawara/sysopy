@@ -106,6 +106,11 @@ void process_arguments(int argc, char **argv, program_arguments *args) {
 
 void open_socket(program_arguments *args) {
 		sd = socket(args->sock_type, SOCK_DGRAM, 0);
+	if(args->mode == MODE_LOCAL) {
+		struct sockaddr_un me;
+		me.sun_family = AF_UNIX;
+		int result = bind(sd, (void*)&me, sizeof(short));
+	}
 }
 
 void close_socket() {
