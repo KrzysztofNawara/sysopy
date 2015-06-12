@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <limits.h>
+#include <sys/time.h>
 
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -92,11 +93,22 @@ void sigint_handler(int signo) {
     loop = false;
 }
 
+/*
+ * Make it a struct!
+ */
 int clientCapacity = 0;
 struct sockaddr **clientTab = NULL;
 socklen_t *clientSizes = NULL;
 int *clientDesc = NULL;
+long *clientLastHeardOf = NULL;
 int clientIterator = 0;
+
+long curr_time() {
+    struct timeval tm;
+    gettimeofday(&tm, NULL);
+
+    return tm.tv_sec;
+}
 
 void addClient(struct sockaddr *cli_addr, socklen_t size, int desc) {
     if(clientIterator >= clientCapacity) {
@@ -104,22 +116,25 @@ void addClient(struct sockaddr *cli_addr, socklen_t size, int desc) {
         clientTab = realloc(clientTab, sizeof(struct sockaddr*)*clientCapacity);
         clientSizes = realloc(clientSizes, sizeof(socklen_t)*clientCapacity);
         clientDesc = realloc(clientDesc, sizeof(int)*clientCapacity);
+        clientLastHeardOf = realloc(clientLastHeardOf, sizeof(long)*clientCapacity);
     }
 
     clientTab[clientIterator] = cli_addr;
     clientSizes[clientIterator] = size;
     clientDesc[clientIterator] = desc;
+    clientLastHeardOf[clientIterator] = curr_time();
+
     clientIterator++;
 }
 
-short clientPresent(struct sockaddr *cli_addr) {
+int clientPresent(struct sockaddr *cli_addr) {
     for(int i = 0; i < clientIterator; i++) {
-        if(sockaddr_cmp(cli_addr, clientTab[i]) == 0) {
-            return 1;
+        if(clientTab[i] != NULL && sockaddr_cmp(cli_addr, clientTab[i]) == 0) {
+            return i;
         }
     }
 
-    return 0;
+    return -1;
 }
 
 int main(int argc, char **argv) {
@@ -216,22 +231,39 @@ int main(int argc, char **argv) {
                         exit(1);
                     }
                     //      IF MESSAGE IS CLIENT REGISTERING, THEN
-                    if(clientPresent(cli_addr) == 0) {
+                    int cid = clientPresent(cli_addr);
+                    if(cid == -1) {
                         addClient(cli_addr, actual_length, ufds[i].fd);
+                    } else {
+                        /* update timestamp */
+                        clientLastHeardOf[cid] = curr_time();
                     }
-                    //printf("Got connection from %s:%d to port %d, received: %s from: %s\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port), UDP_PORT_BASE + i, buf.msg ,buf.from);
-                    printf("Received: %s from: %s\n", buf.msg, buf.from);
-                    //      ELSE SEND TO ALL1
-                    int j;
-                    for (j = 0; j < clientIterator; j++) {
-                        // printf("Sending to %s port %i\n", inet_ntoa(clientTab[j].sin_addr), ntohs(clientTab[j].sin_port));
-                        cli_addr = clientTab[j];
-                        actual_length = clientSizes[j];
-                        if (sendto(clientDesc[j], &buf, recv_len, 0, cli_addr, actual_length) == -1) {
-                            perror("sendto(...) failed");
-                            exit(1);
+
+                    /* now we have to check whether it was just a keepalive or a legitimate message, which should be forwarded */
+                    if(recv_len == sizeof(message)) {
+                        /* this is legit message! */
+                        printf("Received: %s from: %s\n", buf.msg, buf.from);
+                        int j;
+
+                        long reference_time = curr_time();
+                        for (j = 0; j < clientIterator; j++) {
+                            cli_addr = clientTab[j];
+                            actual_length = clientSizes[j];
+
+                            if(reference_time - clientLastHeardOf[j] > TIMEOUT_SEC) {
+                                /* kick this guy out */
+                                free(clientTab[j]);
+                                clientTab[j] = NULL;
+                                printf("Client timed out\n");
+                            } else {
+                                if (sendto(clientDesc[j], &buf, recv_len, 0, cli_addr, actual_length) == -1) {
+                                    perror("sendto(...) failed");
+                                    exit(1);
+                                }
+                            }
                         }
                     }
+
                     events--;
                 }
             }

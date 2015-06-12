@@ -16,6 +16,7 @@
 #define MIN_PORT 1024
 #define MAX_PORT 65535
 #define MSG_QUEUES_CAPACITY 64
+#define TIMEOUT_SEC 10
 
 /* Interface */
 #define USR_CMD_EXIT "e\n"
