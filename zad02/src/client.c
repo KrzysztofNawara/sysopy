@@ -107,13 +107,14 @@ void process_arguments(int argc, char **argv, program_arguments *args) {
 /* ------------------------------- */
 
 void open_socket(program_arguments *args) {
-	sd = socket(args->sock_type, SOCK_DGRAM, 0);
+	sd = socket(args->sock_type, SOCK_STREAM, 0);
 
-	if(args->mode == MODE_LOCAL) {
+	/*if(args->mode == MODE_LOCAL) {
 		struct sockaddr_un me;
 		me.sun_family = AF_UNIX;
 		int result = bind(sd, (void*)&me, sizeof(short));
-	}
+	}*/
+	connect(sd, args->address, args->address_size);
 }
 
 void close_socket() {
@@ -232,14 +233,14 @@ void thread_networking(thread_data *data) {
 		ret = poll(poll_receiving, 1, -1);
 		if(ret > 0 && (poll_receiving[0].revents & POLLIN) != 0) {
 			message *incoming_msg = malloc(sizeof(message));
-			recvfrom(sd, incoming_msg, sizeof(message), 0, NULL, NULL);
+			recv(sd, incoming_msg, sizeof(message), 0);
 			queue_enqueue(data->q_out, incoming_msg);
 
 			poll_receiving[0].revents = 0;
 		} else if (ret == -1 && errno == EINTR) {
 			message *msg;
 			while(msg = queue_dequeue(data->q_in), msg != NULL) {
-				sendto(sd, msg, sizeof(message), 0, data->program_args->address, data->program_args->address_size);
+				send(sd, msg, sizeof(message), 0);
 				free(msg);
 			}
 		}
