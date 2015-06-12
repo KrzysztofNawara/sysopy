@@ -159,7 +159,10 @@ int main() {
             /* now check the rest for ordinary transmission requests */
 
             for (; i < clientIterator; i++) {
-                if (ufds[i].revents & POLLIN) {
+                if(ufds[i].revents & POLLHUP) {
+                    printf("Client disconnected\n");
+                    ufds[i].events = 0;
+                } else if (ufds[i].revents & POLLIN) {
                     if ((recv_len = recv(ufds[i].fd, &buf, sizeof(buf), 0)) == -1) {
                         if (errno == EINTR) {
                             continue;
@@ -173,6 +176,7 @@ int main() {
 
                     for (int j = 2; j < clientIterator; j++) {
                         if (send(ufds[j].fd, &buf, recv_len, 0) == -1) {
+                            if()
                             perror("sendto(...) failed");
                             exit(1);
                         }

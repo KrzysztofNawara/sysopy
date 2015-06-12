@@ -243,6 +243,9 @@ void thread_networking(thread_data *data) {
 				send(sd, msg, sizeof(message), 0);
 				free(msg);
 			}
+		} else if(ret > 0 && (poll_receiving[0].revents & POLLHUP) != 0) {
+			printf("Server disconnected\n");
+			should_exit = 1;
 		}
 	}
 }
