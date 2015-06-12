@@ -24,6 +24,7 @@
 #define UDP_PORT_COUNT 2
 
 #define UNIX_ADDR "./unix_socket"
+#define INIT_CLIENTS 2
 
 bool loop = true;
 
@@ -33,12 +34,20 @@ void sigint_handler(int signo) {
     loop = false;
 }
 
-struct sockaddr *clientTab[10];
-socklen_t clientSizes[10];
-int clientDesc[10];
+int clientCapacity = 0;
+struct sockaddr **clientTab = NULL;
+socklen_t *clientSizes = NULL;
+int *clientDesc = NULL;
 int clientIterator = 0;
 
 void addClient(struct sockaddr *cli_addr, socklen_t size, int desc) {
+    if(clientIterator >= clientCapacity) {
+        clientCapacity = (clientCapacity > 0) ? 2*clientCapacity : INIT_CLIENTS;
+        clientTab = realloc(clientTab, sizeof(struct sockaddr*)*clientCapacity);
+        clientSizes = realloc(clientSizes, sizeof(socklen_t)*clientCapacity);
+        clientDesc = realloc(clientDesc, sizeof(int)*clientCapacity);
+    }
+
     clientTab[clientIterator] = cli_addr;
     clientSizes[clientIterator] = size;
     clientDesc[clientIterator] = desc;
