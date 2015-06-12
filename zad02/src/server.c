@@ -145,23 +145,27 @@ int main() {
             /* first, check listening ports if somebody does not want to connect */
             int res = -1;
             i = 0;
-            for(; i < 2; i++) {
-                res = accept(ufds[i].fd, NULL, NULL);
-                if(res > 0) {
-                    /* new client connected! */
-                    addClient(res);
-                } else if(res == -1 && errno != EWOULDBLOCK && errno != EAGAIN) {
-                    perror("accept(...) failed");
-                    exit(1);
+            for(; i < 2 && events > 0; i++) {
+                if(ufds[i].revents & POLLIN) {
+                    res = accept(ufds[i].fd, NULL, NULL);
+                    if (res > 0) {
+                        /* new client connected! */
+                        addClient(res);
+                    } else if (res == -1 && errno != EWOULDBLOCK && errno != EAGAIN) {
+                        perror("accept(...) failed");
+                        exit(1);
+                    }
+
+                    events--;
                 }
             }
 
             /* now check the rest for ordinary transmission requests */
 
-            for (; i < clientIterator; i++) {
+            for (; i < clientIterator && events > 0; i++) {
                 if(ufds[i].revents & POLLHUP) {
                     printf("Client disconnected\n");
-                    ufds[i].events = 0;
+                    ufds[i].fd *= -1;
                 } else if (ufds[i].revents & POLLIN) {
                     if ((recv_len = recv(ufds[i].fd, &buf, sizeof(buf), 0)) == -1) {
                         if (errno == EINTR) {
@@ -175,10 +179,11 @@ int main() {
                     //      ELSE SEND TO ALL1
 
                     for (int j = 2; j < clientIterator; j++) {
-                        if (send(ufds[j].fd, &buf, recv_len, 0) == -1) {
-                            if()
-                            perror("sendto(...) failed");
-                            exit(1);
+                        if(ufds[j].fd >= 0) {
+                            if (send(ufds[j].fd, &buf, recv_len, 0) == -1) {
+                                perror("sendto(...) failed");
+                                exit(1);
+                            }
                         }
                     }
                     events--;
